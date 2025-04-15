@@ -33,6 +33,7 @@ current_date = start_date
 while current_date <= end_date:
     date_str = current_date.strftime("%Y/%m/%d")
     log_str = current_date.strftime("%Y-%m-%d")
+    all_results = []
 
     if log_str in collected_dates:
         current_date += timedelta(days=1)
@@ -45,20 +46,23 @@ while current_date <= end_date:
     try:
         # Wait for race table
         WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.XPATH, '//table[contains(@class, "table_bd") and contains(@class, "f_fs13")]'))
+            #EC.presence_of_element_located((By.XPATH, '//table[contains(@class, "table_bd") and contains(@class, "f_fs13")]'))
+            EC.presence_of_element_located((By.XPATH, '//table[contains(@class, "f_fs13")]'))
             
         )
 
-        # Optional: print page snippet for debugging
-        print(driver.page_source[:1000])
-
         # Now collect tables
-        race_tables = driver.find_elements(By.XPATH, '//table[@class="f_tac table_bd f_fs13"]')
+        #race_tables = driver.find_elements(By.XPATH, '//table[@class="f_tac table_bd f_fs13"]')
+        race_tables = driver.find_elements(By.XPATH, '//table[contains(@class, "f_fs13")]')
 
     except Exception as e:
         print(f"⚠️ Timeout or error: No race table found for {date_str} — {e}")
         current_date += timedelta(days=1)
         continue
+    
+    #race_headers = driver.find_elements(By.XPATH, '//div[@class="f_fs18 f_fwb"]')
+    race_headers = driver.find_elements(By.XPATH, '//div[contains(@class, "f_fs18")]')
+    
 
     try:
         if not race_tables:
@@ -99,6 +103,7 @@ while current_date <= end_date:
 
     collected_dates.add(log_str)
     current_date += timedelta(days=1)
+
 
     # Important: switch back to main page
     driver.switch_to.default_content()
