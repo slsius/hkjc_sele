@@ -1,0 +1,130 @@
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+import pandas as pd
+from datetime import datetime, timedelta
+import os
+
+# Config
+start_date = datetime.strptime("2025/04/13", "%Y/%m/%d")
+end_date = datetime.today()
+data_file = "hkjc_results.csv"
+log_file = "collected_dates.txt"
+
+# Set up Selenium
+options = Options()
+# options.add_argument("--headless")  # Uncomment this line for headless mode
+service = Service(ChromeDriverManager().install())
+driver = webdriver.Chrome(service=service, options=options)
+
+# Load previously collected dates
+if os.path.exists(log_file):
+    with open(log_file, "r") as f:
+        collected_dates = set(f.read().splitlines())
+else:
+    collected_dates = set()
+
+# Loop through dates
+current_date = start_date
+while current_date <= end_date:
+    date_str = current_date.strftime("%Y/%m/%d")
+    log_str = current_date.strftime("%Y-%m-%d")
+    all_results = []
+
+    if log_str in collected_dates:
+        current_date += timedelta(days=1)
+        continue
+
+    print(f"Processing {date_str}...")
+    url = f"https://racing.hkjc.com/racing/information/Chinese/Racing/ResultsAll.aspx?RaceDate={date_str}"
+    driver.get(url)
+
+    try:
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.XPATH, '//table[contains(@class, "f_fs13")]'))
+        )
+    except Exception as e:
+        print(f"⚠️ Timeout or error: No race table found for {date_str} — {e}")
+        current_date += timedelta(days=1)
+        continue
+
+    try:
+        # Extract weather info
+        try:
+            weather = driver.find_element(By.XPATH, '//span[@id="weather"]').text.strip()
+        except:
+            weather = ""
+
+        # Each race block starts with a "第 X 場" heading
+        #race_headers = driver.find_elements(By.XPATH, '//div[contains(@class, "f_fs13")]')
+        race_headers = driver.find_elements(By.XPATH, '//div[contains(@class, "race_tab")]/following-sibling::div[contains(@class,"f_fs13") and contains(text(), "第") and contains(text(), "場")]')
+
+        for header in race_headers:
+            try:
+                race_number = header.text.strip()
+
+                # Race description and start time are in next sibling <div>
+                desc_div = header.find_element(By.XPATH, 'following-sibling::div[1]')
+                race_info_text = desc_div.text.strip()
+
+                # Attempt to split race description and start time
+                if "開跑時間" in race_info_text:
+                    parts = race_info_text.split("開跑時間")
+                    race_description = parts[0].strip(" -")
+                    race_time = parts[1].strip()
+                else:
+                    race_description = race_info_text
+                    race_time = ""
+
+                # Find the next sibling <table> (result table)
+                #result_table = desc_div.find_element(By.XPATH, 'following-sibling::table[1]')
+                result_table = desc_div.find_element(By.XPATH, '//table[contains(@class, "f_fs13")]')
+                rows = result_table.find_elements(By.TAG_NAME, "tr")[1:]  # skip header
+
+                for row in rows:
+                    cols = row.find_elements(By.TAG_NAME, "td")
+                    if len(cols) >= 7:
+                        result = {
+                            "日期": log_str,
+                            "場次": race_number,
+                            "賽事簡介": race_description,
+                            "天氣": weather,
+                            "開跑時間": race_time,
+                            "名次": cols[0].text,
+                            "馬號": cols[1].text,
+                            "馬名": cols[2].text,
+                            "騎師": cols[3].text,
+                            "練馬師": cols[4].text,
+                            "負磅": cols[5].text,
+                            "檔位": cols[6].text,
+                        }
+                        all_results.append(result)
+            except Exception as e:
+                print(f"❌ Error parsing race block: {e}")
+
+        # Save to CSV
+        df = pd.DataFrame(all_results)
+        if not df.empty:
+            if not os.path.exists(data_file):
+                df.to_csv(data_file, index=False, encoding="utf-8-sig")
+            else:
+                df.to_csv(data_file, mode='a', header=False, index=False, encoding="utf-8-sig")
+            print(f"✔ Saved data for {log_str}")
+
+    except Exception as e:
+        print(f"❌ General error on {log_str}: {e}")
+
+    # Mark date as completed
+    with open(log_file, "a") as f:
+        f.write(log_str + "\n")
+
+    collected_dates.add(log_str)
+    current_date += timedelta(days=1)
+
+# Done
+driver.quit()
+print("🎉 Finished scraping.")
